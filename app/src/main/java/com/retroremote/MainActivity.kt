@@ -1,6 +1,8 @@
 package com.retroremote
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -17,6 +19,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -32,6 +35,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.retroremote.core.model.RemoteDevice
 import com.retroremote.discovery.mdns.AndroidTvDiscovery
+import com.retroremote.protocol.AtvIdentity
+import com.retroremote.protocol.AtvPairing
+import com.retroremote.protocol.AtvRemote
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,11 +55,51 @@ private fun RetroRemoteApp() {
     val status = remember { mutableStateOf("Ready to scan your local network") }
     val error = remember { mutableStateOf<String?>(null) }
     val selectedDevice = remember { mutableStateOf<RemoteDevice?>(null) }
+    val prefs = remember(context) { context.getSharedPreferences("retro_remote", 0) }
+    val identity = remember { AtvIdentity.load(prefs) }
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    val pairing = remember { mutableStateOf<AtvPairing?>(null) }
+    val pairingBusy = remember { mutableStateOf(false) }
+    val pairingCode = remember { mutableStateOf("") }
+    val remote = remember { mutableStateOf<AtvRemote?>(null) }
+    val connected = remember { mutableStateOf(false) }
 
     DisposableEffect(discovery) {
         onDispose {
             discovery.stop()
+            pairing.value?.close()
+            remote.value?.close()
             isScanning.value = false
+        }
+    }
+
+    fun selectDevice(device: RemoteDevice) {
+        selectedDevice.value = device
+        pairingCode.value = ""
+        error.value = null
+        val saved = prefs.getString("pin_" + device.host, null)
+        if (saved != null) {
+            pairingBusy.value = true
+            val client = AtvRemote(device.host, identity, saved) { message ->
+                mainHandler.post { status.value = message; connected.value = message == "Connected to Android TV"; pairingBusy.value = false }
+            }
+            remote.value = client
+            Thread({ client.run() }, "RetroRemote-control").start()
+        } else {
+            pairingBusy.value = true
+            Thread({
+                try {
+                    val session = AtvPairing(device.host, identity)
+                    session.begin()
+                    mainHandler.post {
+                        pairing.value = session
+                        pairingBusy.value = false
+                        status.value = "Enter the pairing code shown on your TV"
+                    }
+                } catch (t: Throwable) {
+                    mainHandler.post { pairingBusy.value = false; error.value = t.message ?: "Could not start pairing" }
+                }
+            }, "RetroRemote-pairing").start()
         }
     }
 
@@ -83,20 +129,58 @@ private fun RetroRemoteApp() {
     }
 
     selectedDevice.value?.let { device ->
+        val savedPin = prefs.getString("pin_" + device.host, null)
         AlertDialog(
-            onDismissRequest = { selectedDevice.value = null },
-            title = { Text(device.name) },
+            onDismissRequest = { pairing.value?.close(); pairing.value = null; selectedDevice.value = null },
+            title = { Text(if (pairingBusy.value) "Connecting…" else "Pair " + device.name) },
             text = {
                 Column {
-                    Text("${device.host}:${device.port}")
-                    Text(
-                        "Device discovered successfully. Secure Android TV pairing and remote control are not implemented in this build yet.",
-                        modifier = Modifier.padding(top = 10.dp)
-                    )
+                    Text(device.host + ":6467 pairing / :6466 remote")
+                    if (pairingBusy.value) {
+                        androidx.compose.material3.CircularProgressIndicator()
+                    } else if (savedPin == null) {
+                        Text("Enter the six-character code displayed on your Mi Box.")
+                        OutlinedTextField(value = pairingCode.value, onValueChange = {
+                            pairingCode.value = it.uppercase().filter { c -> c in "0123456789ABCDEF" }.take(6)
+                        }, label = { Text("TV pairing code") }, singleLine = true)
+                    } else {
+                        Text("Saved pairing found. Connecting to the remote service…")
+                    }
+                    error.value?.let { Text(it, color = Color(0xFFFF7777)) }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { selectedDevice.value = null }) { Text("Close") }
+                TextButton(enabled = !pairingBusy.value && pairingCode.value.length == 6 && pairing.value != null,
+                    onClick = {
+                        val session = pairing.value ?: return@TextButton
+                        pairingBusy.value = true
+                        val code = pairingCode.value
+                        Thread({
+                            try {
+                                session.submit(code)
+                                val pin = session.pin
+                                prefs.edit().putString("pin_" + device.host, pin).apply()
+                                session.close()
+                                mainHandler.post {
+                                    pairing.value = null
+                                    pairingBusy.value = false
+                                    status.value = "Pairing successful — connecting…"
+                                    val client = AtvRemote(device.host, identity, pin) { message ->
+                                        mainHandler.post {
+                                            status.value = message
+                                            connected.value = message == "Connected to Android TV"
+                                        }
+                                    }
+                                    remote.value = client
+                                    Thread({ client.run() }, "RetroRemote-control").start()
+                                    selectedDevice.value = null
+                                }
+                            } catch (t: Throwable) {
+                                mainHandler.post { pairingBusy.value = false; error.value = t.message ?: "Pairing failed" }
+                            }
+                        }, "RetroRemote-pair-submit").start()
+                    }) { Text("Pair & connect") }
+                TextButton(onClick = { pairing.value?.close(); pairing.value = null; selectedDevice.value = null }) { Text("Cancel") }
             }
         )
     }
@@ -155,7 +239,7 @@ private fun RetroRemoteApp() {
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(devices, key = { it.id }) { device ->
-                            DeviceCard(device, onClick = { selectedDevice.value = device })
+                            DeviceCard(device, onClick = { selectDevice(device) })
                         }
                     }
                 }
