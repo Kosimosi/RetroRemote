@@ -98,7 +98,7 @@ private fun socket(host:String,port:Int,id:AtvIdentity,trust:X509TrustManager):S
         override fun getCertificateChain(a:String?)=arrayOf(id.cert)
         override fun getPrivateKey(a:String?)=id.key
         override fun getServerAliases(k:String?,i:Array<out java.security.Principal>?)=arrayOf("rr")
-        override fun chooseServerAlias(k:Array<out String>?,i:Array<out java.security.Principal>?,s:Socket?)="rr"
+        override fun chooseServerAlias(k:String?,i:Array<out java.security.Principal>?,s:Socket?)="rr"
         override fun chooseEngineClientAlias(k:Array<out String>?,i:Array<out java.security.Principal>?,e:SSLEngine?)="rr"
         override fun chooseEngineServerAlias(k:String?,i:Array<out java.security.Principal>?,e:SSLEngine?)="rr"
     }
