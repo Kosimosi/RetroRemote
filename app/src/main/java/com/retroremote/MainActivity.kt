@@ -6,17 +6,30 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.retroremote.core.model.RemoteDevice
+import com.retroremote.discovery.mdns.AndroidTvDiscovery
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -27,26 +40,125 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun RetroRemoteApp() {
+    val context = LocalContext.current
+    val discovery = remember(context) { AndroidTvDiscovery(context) }
+    val devices = remember { mutableStateListOf<RemoteDevice>() }
+    val isScanning = remember { mutableStateOf(false) }
+    val status = remember { mutableStateOf("Ready to scan your local network") }
+    val error = remember { mutableStateOf<String?>(null) }
+
+    DisposableEffect(discovery) {
+        onDispose {
+            discovery.stop()
+            isScanning.value = false
+        }
+    }
+
+    fun startDiscovery() {
+        devices.clear()
+        error.value = null
+        status.value = "Searching for Android TV devices…"
+        isScanning.value = true
+        discovery.start(
+            onDevice = { device ->
+                if (devices.none { it.id == device.id }) {
+                    devices.add(device)
+                    status.value = if (devices.size == 1) "Found 1 Android TV device" else "Found ${devices.size} Android TV devices"
+                }
+            },
+            onError = { throwable ->
+                error.value = throwable.message ?: "Unknown discovery error"
+                status.value = "Discovery encountered an error"
+            }
+        )
+    }
+
+    fun stopDiscovery() {
+        discovery.stop()
+        isScanning.value = false
+        status.value = if (devices.isEmpty()) "Scan stopped — no devices found" else "Scan stopped — ${devices.size} device(s) found"
+    }
+
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFF0B0B0E)) {
             Column(
                 modifier = Modifier.fillMaxSize().background(Color(0xFF0B0B0E)).padding(24.dp),
-                verticalArrangement = Arrangement.Center,
+                verticalArrangement = Arrangement.Top,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text("RetroRemote", color = Color.White, style = MaterialTheme.typography.headlineLarge)
                 Text(
                     "Universal control for your TV devices",
                     color = Color(0xFFB8B8C0),
-                    modifier = Modifier.padding(top = 8.dp, bottom = 28.dp)
+                    modifier = Modifier.padding(top = 8.dp, bottom = 24.dp)
                 )
-                Button(onClick = { }) { Text("Discover Android TV devices") }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = { if (isScanning.value) stopDiscovery() else startDiscovery() }
+                    ) {
+                        Text(if (isScanning.value) "Stop scanning" else if (devices.isEmpty()) "Discover Android TV devices" else "Scan again")
+                    }
+                }
+
                 Text(
-                    "Discovery UI and secure pairing are the next implementation steps.",
-                    color = Color(0xFF8E8E98),
-                    modifier = Modifier.padding(top = 18.dp)
+                    status.value,
+                    color = if (error.value == null) Color(0xFFB8B8C0) else Color(0xFFFF7777),
+                    modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+                )
+
+                error.value?.let {
+                    Text("Discovery error: $it", color = Color(0xFFFF7777), modifier = Modifier.padding(bottom = 8.dp))
+                }
+
+                if (devices.isEmpty()) {
+                    Text(
+                        "Make sure your phone and Android TV are on the same Wi-Fi network. Keep the TV awake while scanning.",
+                        color = Color(0xFF8E8E98),
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                } else {
+                    Text(
+                        "AVAILABLE DEVICES",
+                        color = Color(0xFFE11D48),
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp)
+                    )
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(devices, key = { it.id }) { device ->
+                            DeviceCard(device)
+                        }
+                    }
+                }
+
+                Text(
+                    "Secure pairing and remote controls are the next implementation steps.",
+                    color = Color(0xFF777780),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 20.dp)
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun DeviceCard(device: RemoteDevice) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF19191F))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(device.name, color = Color.White, style = MaterialTheme.typography.titleMedium)
+            Text("${device.host}:${device.port}", color = Color(0xFFB8B8C0), style = MaterialTheme.typography.bodyMedium)
+            Text(device.serviceType, color = Color(0xFF85858F), style = MaterialTheme.typography.bodySmall)
         }
     }
 }
