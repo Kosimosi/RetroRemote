@@ -81,7 +81,7 @@ private fun RetroRemoteApp() {
         if (saved != null) {
             pairingBusy.value = true
             val client = AtvRemote(device.host, identity, saved) { message ->
-                mainHandler.post { status.value = message; connected.value = message == "Connected to Android TV"; pairingBusy.value = false; if (connected.value) selectedDevice.value = null }
+                mainHandler.post { status.value = message; connected.value = message.startsWith("Connected to Android TV"); pairingBusy.value = false; if (connected.value) selectedDevice.value = null }
             }
             remote.value = client
             Thread({ client.run() }, "RetroRemote-control").start()
@@ -168,7 +168,7 @@ private fun RetroRemoteApp() {
                                     val client = AtvRemote(device.host, identity, pin) { message ->
                                         mainHandler.post {
                                             status.value = message
-                                            connected.value = message == "Connected to Android TV"
+                                            connected.value = message.startsWith("Connected to Android TV")
                                         }
                                     }
                                     remote.value = client
