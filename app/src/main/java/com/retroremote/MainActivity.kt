@@ -244,12 +244,36 @@ private fun RetroRemoteApp() {
                     }
                 }
 
-                Text(
-                    "Secure pairing and remote controls are the next implementation steps.",
-                    color = Color(0xFF777780),
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 20.dp)
-                )
+                if (connected.value) {
+                    Text("REMOTE CONTROL", color = Color(0xFFE11D48), modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { remote.value?.press(19) }) { Text("▲") }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Button(onClick = { remote.value?.press(21) }) { Text("◀") }
+                            Button(onClick = { remote.value?.press(23) }) { Text("OK") }
+                            Button(onClick = { remote.value?.press(22) }) { Text("▶") }
+                        }
+                        Button(onClick = { remote.value?.press(20) }) { Text("▼") }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { remote.value?.press(4) }) { Text("BACK") }
+                            Button(onClick = { remote.value?.press(3) }) { Text("HOME") }
+                            Button(onClick = { remote.value?.press(82) }) { Text("MENU") }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { remote.value?.press(25) }) { Text("VOL −") }
+                            Button(onClick = { remote.value?.press(164) }) { Text("MUTE") }
+                            Button(onClick = { remote.value?.press(24) }) { Text("VOL +") }
+                        }
+                        TextButton(onClick = { remote.value?.close(); connected.value = false; status.value = "Disconnected" }) { Text("Disconnect") }
+                    }
+                } else {
+                    Text(
+                        "Pair once using the code shown on your TV. The trusted certificate is saved on this phone.",
+                        color = Color(0xFF777780),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 20.dp)
+                    )
+                }
             }
         }
     }
