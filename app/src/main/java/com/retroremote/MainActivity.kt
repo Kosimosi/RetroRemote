@@ -15,6 +15,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -46,6 +48,7 @@ private fun RetroRemoteApp() {
     val isScanning = remember { mutableStateOf(false) }
     val status = remember { mutableStateOf("Ready to scan your local network") }
     val error = remember { mutableStateOf<String?>(null) }
+    val selectedDevice = remember { mutableStateOf<RemoteDevice?>(null) }
 
     DisposableEffect(discovery) {
         onDispose {
@@ -77,6 +80,25 @@ private fun RetroRemoteApp() {
         discovery.stop()
         isScanning.value = false
         status.value = if (devices.isEmpty()) "Scan stopped — no devices found" else "Scan stopped — ${devices.size} device(s) found"
+    }
+
+    selectedDevice.value?.let { device ->
+        AlertDialog(
+            onDismissRequest = { selectedDevice.value = null },
+            title = { Text(device.name) },
+            text = {
+                Column {
+                    Text("${device.host}:${device.port}")
+                    Text(
+                        "Device discovered successfully. Secure Android TV pairing and remote control are not implemented in this build yet.",
+                        modifier = Modifier.padding(top = 10.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { selectedDevice.value = null }) { Text("Close") }
+            }
+        )
     }
 
     MaterialTheme {
@@ -133,7 +155,7 @@ private fun RetroRemoteApp() {
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(devices, key = { it.id }) { device ->
-                            DeviceCard(device)
+                            DeviceCard(device, onClick = { selectedDevice.value = device })
                         }
                     }
                 }
@@ -150,8 +172,9 @@ private fun RetroRemoteApp() {
 }
 
 @Composable
-private fun DeviceCard(device: RemoteDevice) {
+private fun DeviceCard(device: RemoteDevice, onClick: () -> Unit) {
     Card(
+        onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF19191F))
     ) {
