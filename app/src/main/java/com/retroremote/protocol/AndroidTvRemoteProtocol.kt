@@ -151,26 +151,64 @@ class AtvPairing(private val host:String,private val identity:AtvIdentity):Close
 private fun shaPin(c:X509Certificate)=MessageDigest.getInstance("SHA-256").digest(c.publicKey.encoded).joinToString(""){"%02x".format(it)}
 class AtvRemote(private val host:String,private val identity:AtvIdentity,private val pin:String,private val status:(String)->Unit) {
     @Volatile private var s:SSLSocket?=null
+    private val writeLock=Any()
     @Volatile var connected=false;private set
+
+    private fun send(out:OutputStream,data:ByteArray) {
+        synchronized(writeLock) { writeFrame(out,data) }
+    }
+
     fun run() {
         val trust=object:X509TrustManager {
             override fun checkServerTrusted(c:Array<out X509Certificate>?,a:String?){val cert=c?.firstOrNull()?:error("TV certificate missing");require(shaPin(cert)==pin){"TV identity changed; pair again"}}
             override fun checkClientTrusted(c:Array<out X509Certificate>?,a:String?)=Unit
             override fun getAcceptedIssuers()=emptyArray<X509Certificate>()
         }
-        try { val sock=socket(host,6466,identity,trust);s=sock;val input=BufferedInputStream(sock.inputStream);val out=sock.outputStream;var features=0
+        try {
+            val sock=socket(host,6466,identity,trust);s=sock
+            val input=BufferedInputStream(sock.inputStream);val out=sock.outputStream
+            var features=0
             status("Negotiating secure remote connection…")
-            while(true){val m=R(readFrame(input)).fields();when(m.keys.firstOrNull()){
-                1->{val offered=m.sub(1)?.num(1)?:0;features=offered and (1 or 2 or 32 or 64 or 512)
-                    val info=W().s(1,"Android").s(2,"RetroRemote").i(3,1).s(4,android.os.Build.VERSION.RELEASE).s(5,"RetroRemote").s(6,"0.1.0")
-                    writeFrame(out,W().m(1,W().i(1,features).m(2,info)).data())}
-                2->{writeFrame(out,W().m(2,W().i(1,features)).data());connected=true;status("Connected to Android TV")}
-                8->{writeFrame(out,W().m(9,W().i(1,m.sub(8)?.num(1)?:0)).data())}
-                3->error("TV rejected remote session")
-            }}
-        } catch(t:Throwable){status("Disconnected: "+(t.message?:t.javaClass.simpleName))}
-        finally{connected=false;runCatching{s?.close()};s=null}
+            while(true) {
+                val m=R(readFrame(input)).fields()
+                when(m.keys.firstOrNull()) {
+                    1 -> {
+                        val offered=m.sub(1)?.num(1)?:0
+                        features=offered and (1 or 2 or 32 or 64 or 512)
+                        // Match the Android TV Remote v2 client metadata used by working clients.
+                        val info=W().i(3,1).s(4,"1").s(5,"atvremote").s(6,"1.0.0")
+                        send(out,W().m(1,W().i(1,features).m(2,info)).data())
+                    }
+                    2 -> {
+                        send(out,W().m(2,W().i(1,features)).data())
+                        connected=true
+                        status("Connected to Android TV")
+                    }
+                    8 -> send(out,W().m(9,W().i(1,m.sub(8)?.num(1)?:0)).data())
+                    3 -> error("TV rejected remote session")
+                }
+            }
+        } catch(t:Throwable) {
+            connected=false
+            status("Disconnected: "+(t.message?:t.javaClass.simpleName))
+        } finally {
+            connected=false
+            runCatching{s?.close()}
+            s=null
+        }
     }
-    fun press(keyCode:Int){if(connected)try{writeFrame(s!!.outputStream,W().m(10,W().i(1,keyCode).i(2,3)).data())}catch(_:Throwable){connected=false}}
+
+    fun press(keyCode:Int) {
+        if(!connected)return
+        try {
+            val sock=s?:error("Remote socket is not connected")
+            send(sock.outputStream,W().m(10,W().i(1,keyCode).i(2,3)).data())
+        } catch(t:Throwable) {
+            connected=false
+            status("Disconnected: key command failed — "+(t.message?:t.javaClass.simpleName))
+            runCatching{s?.close()}
+        }
+    }
+
     fun close(){connected=false;runCatching{s?.close()}}
 }
