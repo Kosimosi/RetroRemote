@@ -175,6 +175,7 @@ class AtvRemote(private val host:String,private val identity:AtvIdentity,private
                     1 -> {
                         val offered=m.sub(1)?.num(1)?:0
                         features=offered and (1 or 2 or 32 or 64 or 512)
+                        status("TV features offered=$offered; negotiated=$features")
                         // Match the Android TV Remote v2 client metadata used by working clients.
                         val info=W().i(3,1).s(4,"1").s(5,"atvremote").s(6,"1.0.0")
                         send(out,W().m(1,W().i(1,features).m(2,info)).data())
@@ -182,10 +183,14 @@ class AtvRemote(private val host:String,private val identity:AtvIdentity,private
                     2 -> {
                         send(out,W().m(2,W().i(1,features)).data())
                         connected=true
-                        status("Connected to Android TV")
+                        status("Connected to Android TV · features=$features")
                     }
                     8 -> send(out,W().m(9,W().i(1,m.sub(8)?.num(1)?:0)).data())
-                    3 -> error("TV rejected remote session")
+                    3 -> {
+                        val remoteError=m.sub(3)
+                        val nestedFields=remoteError?.sub(2)?.keys?.sorted()?.joinToString(",") ?: "none"
+                        error("TV RemoteError: value=\${remoteError?.num(1) ?: -1}, nested message fields=$nestedFields")
+                    }
                 }
             }
         } catch(t:Throwable) {
@@ -203,6 +208,7 @@ class AtvRemote(private val host:String,private val identity:AtvIdentity,private
         try {
             val sock=s?:error("Remote socket is not connected")
             send(sock.outputStream,W().m(10,W().i(1,keyCode).i(2,3)).data())
+            status("Connected to Android TV · sent keyCode=$keyCode")
         } catch(t:Throwable) {
             connected=false
             status("Disconnected: key command failed — "+(t.message?:t.javaClass.simpleName))
