@@ -37,7 +37,11 @@ class AtvIdentity private constructor(val key: PrivateKey, val cert: X509Certifi
 private fun selfSigned(pair: KeyPair, cn: String): X509Certificate {
     fun tlv(tag: Int, b: ByteArray): ByteArray {
         val o = ByteArrayOutputStream(); o.write(tag)
-        if (b.size < 128) o.write(b.size) else { o.write(0x81); o.write(b.size) }
+        when {
+            b.size < 128 -> o.write(b.size)
+            b.size < 256 -> { o.write(0x81); o.write(b.size) }
+            else -> { o.write(0x82); o.write(b.size ushr 8); o.write(b.size and 255) }
+        }
         o.write(b); return o.toByteArray()
     }
     fun seq(vararg parts: ByteArray): ByteArray {
